@@ -1,5 +1,5 @@
 # app_web.py
-# 2025 品牌运营最终版：修复语法错误 (except Exception)
+# 2025 品牌运营最终版：移除颜色偏好选择
 import streamlit as st
 import os
 import datetime
@@ -22,19 +22,17 @@ from crystal_db import get_smart_recommendations
 # ===========================
 # 🖼️ 品牌素材加载
 # ===========================
-# 1. 定义我们想要加载的 Logo 文件名
 LOGO_PATH = "logo.jpg" 
 
-# 2. 安全加载逻辑
-logo_img = "💎" # 默认图标
-logo_for_display = None # 用于显示的图片对象
+logo_img = "💎" 
+logo_for_display = None 
 
 if os.path.exists(LOGO_PATH):
     try:
         loaded_img = Image.open(LOGO_PATH)
         logo_img = loaded_img 
         logo_for_display = loaded_img
-    except Exception as e: # 👈 修复了这里：增加了空格
+    except Exception as e:
         print(f"图片加载失败: {e}")
         logo_img = "💎"
 
@@ -48,8 +46,8 @@ st.set_page_config(
 # ===========================
 # 🔐 全局配置
 # ===========================
-ADMIN_PASSWORD = "888"         # 店主管理密码
-CODES_FILE = "invite_codes.csv" # 存储邀请码的文件
+ADMIN_PASSWORD = "888"         
+CODES_FILE = "invite_codes.csv" 
 HISTORY_FILE = "customer_history.csv"
 
 # ===========================
@@ -94,7 +92,6 @@ def deduct_code_count(code):
 # ===========================
 # 🟢 侧边栏：品牌标识与登录
 # ===========================
-# 1. 侧边栏品牌标识
 if logo_for_display:
     st.sidebar.image(logo_for_display, width=150)
     
@@ -167,12 +164,13 @@ if is_verified:
         m_cols = st.sidebar.columns(5)
         for i, l in enumerate(["金","木","水","火","土"]):
             if m_cols[i].checkbox(l): manual_elements.append(l)
-    user_colors = st.sidebar.multiselect("颜色偏好", ["红","紫","黄","金","绿","蓝","黑","白"])
+    
+    # 【已修改】移除了颜色偏好的UI组件，改为默认空列表
+    user_colors = [] 
 
 # ===========================
 # 🔵 主界面逻辑
 # ===========================
-# 创建品牌头部布局
 col_logo, col_title = st.columns([1, 6])
 with col_logo:
     if logo_for_display:
@@ -191,7 +189,6 @@ if not is_verified:
     st.warning("请在左侧输入 **【邀请码】** 开启您的专属定制服务。")
     st.stop()
 
-# 只有验证通过才会显示下面的按钮
 if st.button("🚀 开始生成方案 (扣除1次)"):
     
     if analysis_mode == "🧠 专家人工" and not manual_elements:
@@ -228,6 +225,7 @@ if st.button("🚀 开始生成方案 (扣除1次)"):
             for k,v in kw_map.items(): 
                 if k in user_goal: goal_kws+=v
             
+            # 这里 user_colors 传的是空列表，表示不限颜色
             matched = get_smart_recommendations(final_elements, user_colors, goal_kws)
 
             # 5. 展示
