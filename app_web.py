@@ -1,5 +1,7 @@
 # app_web.py
-# 2025 品牌运营最终版：移除颜色偏好选择
+# 2025 品牌运营最终整合版 (修复版)
+# 包含：邀请码系统 + 移除颜色选择 + 智能风险预警(已修复逻辑冲突)
+
 import streamlit as st
 import os
 import datetime
@@ -10,7 +12,9 @@ import string
 from lunar_python import Lunar
 from PIL import Image
 
-# 强制加载核心模块
+# ===========================
+# 🔧 核心模块加载 (强制热更新)
+# ===========================
 import calc_bazi
 importlib.reload(calc_bazi)
 from calc_bazi import get_bazi_info, analyze_liunian_strategy
@@ -23,7 +27,6 @@ from crystal_db import get_smart_recommendations
 # 🖼️ 品牌素材加载
 # ===========================
 LOGO_PATH = "logo.jpg" 
-
 logo_img = "💎" 
 logo_for_display = None 
 
@@ -34,9 +37,8 @@ if os.path.exists(LOGO_PATH):
         logo_for_display = loaded_img
     except Exception as e:
         print(f"图片加载失败: {e}")
-        logo_img = "💎"
 
-# 3. 页面配置
+# 页面配置
 st.set_page_config(
     page_title="一条禾瑜 | 水晶命理高定",
     layout="wide",
@@ -46,7 +48,7 @@ st.set_page_config(
 # ===========================
 # 🔐 全局配置
 # ===========================
-ADMIN_PASSWORD = "888"         
+ADMIN_PASSWORD = "888"          
 CODES_FILE = "invite_codes.csv" 
 HISTORY_FILE = "customer_history.csv"
 
@@ -61,7 +63,13 @@ def init_code_db():
 def generate_invite_code(limit=5, note="VIP客户"):
     init_code_db()
     code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-    new_data = {"邀请码": code, "总次数": limit, "已用次数": 0, "备注": note, "创建时间": datetime.datetime.now().strftime("%Y-%m-%d")}
+    new_data = {
+        "邀请码": code, 
+        "总次数": limit, 
+        "已用次数": 0, 
+        "备注": note, 
+        "创建时间": datetime.datetime.now().strftime("%Y-%m-%d")
+    }
     df = pd.read_csv(CODES_FILE)
     df = pd.concat([df, pd.DataFrame([new_data])], ignore_index=True)
     df.to_csv(CODES_FILE, index=False, encoding='utf-8-sig')
@@ -99,13 +107,12 @@ st.sidebar.markdown("### 一条禾瑜 · 水晶命理")
 st.sidebar.caption("专属高定 | 能量平衡 | 运势加持")
 st.sidebar.markdown("---")
 
-# 2. 登录验证
+# 登录验证逻辑
 st.sidebar.title("💎 登录验证")
 auth_mode = st.sidebar.radio("身份", ["👤 贵宾使用", "🔑 店主管理"])
 
 current_code = ""
 is_verified = False
-remain_times = 0
 
 if auth_mode == "👤 贵宾使用":
     current_code = st.sidebar.text_input("请输入您的邀请码", placeholder="例如: X7Y9Z2")
@@ -131,6 +138,7 @@ else:
                 new_code = generate_invite_code(new_limit, new_note)
                 st.sidebar.code(new_code, language="text")
                 st.sidebar.success("已生成！请复制给客人")
+        
         if st.sidebar.checkbox("查看邀请码列表"):
             init_code_db()
             df_codes = pd.read_csv(CODES_FILE)
@@ -152,10 +160,10 @@ if is_verified:
     
     st.sidebar.subheader("核心愿望")
     user_goal = st.sidebar.selectbox("选择愿望", ["📅 年度流年运势", "平衡/综合", "求财/事业", "求姻缘", "求健康"])
+    
+    target_year = 2025
     if "流年" in user_goal:
-        target_year = st.sidebar.selectbox("年份", [2025, 2026])
-    else:
-        target_year = 2025
+        target_year = st.sidebar.selectbox("选择年份", [2025, 2026])
 
     analysis_mode = st.sidebar.radio("模式", ["🤖 AI 智能", "🧠 专家人工"])
     manual_elements = []
@@ -165,7 +173,7 @@ if is_verified:
         for i, l in enumerate(["金","木","水","火","土"]):
             if m_cols[i].checkbox(l): manual_elements.append(l)
     
-    # 【已修改】移除了颜色偏好的UI组件，改为默认空列表
+    # 颜色默认为空（不限）
     user_colors = [] 
 
 # ===========================
@@ -199,16 +207,18 @@ if st.button("🚀 开始生成方案 (扣除1次)"):
             if auth_mode == "👤 贵宾使用":
                 deduct_code_count(current_code)
             
-            # 2. 排盘
+            # 2. 排盘计算
+            # 修复点：bazi_report 变量必须在这里定义，后续代码才能使用
             bazi_report = get_bazi_info(birth_date.year, birth_date.month, birth_date.day, hour, minute, gender, "北京")
             analysis = bazi_report['命理分析']
             
-            # 3. 确定喜用
+            # 3. 确定喜用方案
             final_elements = []
             final_desc = ""
+            
             if analysis_mode == "🧠 专家人工":
                 final_elements = manual_elements
-                final_desc = "专家指定方案"
+                final_desc = "由主理人/专家手动指定的平衡方案"
             else:
                 if "流年" in user_goal:
                     lunar = Lunar.fromYmd(target_year, 6, 1)
@@ -219,54 +229,105 @@ if st.button("🚀 开始生成方案 (扣除1次)"):
                     final_elements = analysis['喜用神']
                     final_desc = analysis['分析文案']
 
-            # 4. 匹配
+            # 4. 智能匹配水晶
+            # 修复点：final_elements 必须在上面计算完成后，这里才能作为参数传入
             kw_map = {"求财":["财"], "姻缘":["桃","爱"], "健康":["安"]}
             goal_kws = []
             for k,v in kw_map.items(): 
-                if k in user_goal: goal_kws+=v
+                if k in user_goal: goal_kws += v
             
-            # 这里 user_colors 传的是空列表，表示不限颜色
+            # user_colors 为空，表示全颜色匹配
             matched = get_smart_recommendations(final_elements, user_colors, goal_kws)
 
-            # 5. 展示
+            # 5. 结果展示
             st.success("✅ 方案生成成功！")
             
-            # 八字区
+            # --- 八字展示区 ---
             with st.container():
                 st.subheader(f"📜 {customer_name} 的命盘原局")
                 cols = st.columns(4)
-                for i, p in enumerate(bazi_report['八字']): cols[i].metric(["年","月","日","时"][i], p)
+                for i, p in enumerate(bazi_report['八字']): 
+                    cols[i].metric(["年柱","月柱","日柱","时柱"][i], p)
             
-            # 结论区
+            # --- 智能预警逻辑 (已修复冲突) ---
+            if analysis_mode == "🤖 AI 智能":
+                try:
+                    # 修复点：从 '五行统计' 取值，而非不存在的 '五行得分'
+                    scores = bazi_report.get('五行统计', {})
+                    
+                    backend_risks = analysis.get('风险提示', [])
+                    need_manual = analysis.get('需人工复核', False)
+                    
+                    is_risky = False
+                    warning_msgs = []
+
+                    # A. 检查后端已发现的风险
+                    if need_manual and backend_risks:
+                        is_risky = True
+                        warning_msgs.extend(backend_risks)
+
+                    # B. 检查五行缺项
+                    if 0 in scores.values():
+                        is_risky = True
+                        warning_msgs.append("⚠️ 五行有缺项，气场存在短板。")
+
+                    # C. 检查极端不平衡
+                    # 修复点：总分8分，差值>=5即为极度不平衡，不再使用60分阈值
+                    if scores:
+                        max_s = max(scores.values())
+                        min_s = min(scores.values())
+                        if (max_s - min_s) >= 5:
+                            is_risky = True
+                            warning_msgs.append("⚠️ 五行极度不平衡 (疑似专旺/从格)。")
+
+                    if is_risky:
+                        st.error("【系统自动预警】")
+                        for msg in list(set(warning_msgs)):
+                            st.markdown(f"**{msg}**")
+                        st.info("💡 此命局较为特殊，建议联系主理人进行 **人工复核** 以获取更精准方案。")
+                        st.caption("主理人微信：LOVEYTHY")
+                except Exception as e:
+                    # 调试用，生产环境可改为 pass
+                    st.warning(f"预警检测模块提示: {e}")
+
+            # --- 结论区 ---
             st.info(f"💡 命理建议：{final_desc}")
             c1, c2 = st.columns(2)
-            c1.metric("格局", analysis['格局'])
-            c2.metric("推荐五行", "/".join(final_elements))
+            c1.metric("格局判断", analysis['格局'])
+            c2.metric("推荐补益", "/".join(final_elements))
             
             st.markdown("---")
             
-            # 图片区
+            # --- 水晶图片推荐区 ---
             st.subheader("🔮 专属材质推荐")
             if matched:
                 for elem, stones in matched.items():
-                    st.markdown(f"**【补{elem}】**")
+                    st.markdown(f"### **【补{elem}能量】**")
                     icols = st.columns(3)
                     for idx, s in enumerate(stones):
-                        with icols[idx%3]:
-                            path = f"images_product/{s['name']}.jpg"
-                            if not os.path.exists(path): path = f"images/{s['name']}.jpg"
-                            if os.path.exists(path): st.image(path, use_container_width=True)
-                            st.caption(f"{s['name']}")
+                        with icols[idx % 3]:
+                            img_path = f"images_product/{s['name']}.jpg"
+                            if not os.path.exists(img_path): 
+                                img_path = f"images/{s['name']}.jpg"
+                                
+                            if os.path.exists(img_path): 
+                                st.image(img_path, use_container_width=True)
+                            else:
+                                st.caption("（暂无图片）")
+                                
+                            st.markdown(f"**{s['name']}**")
                     st.markdown("---")
             else:
-                st.warning("暂无匹配材质")
+                st.warning("暂无完全匹配的材质，请尝试切换愿望或咨询店主。")
 
-            # 记录历史
+            # 6. 历史记录存档
             try:
                 pd.DataFrame([{
-                    "时间": datetime.datetime.now(),
+                    "时间": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "邀请码": current_code if auth_mode=="👤 贵宾使用" else "管理员",
                     "客户": customer_name,
-                    "推荐": "/".join(final_elements)
+                    "推荐": "/".join(final_elements),
+                    "愿望": user_goal
                 }]).to_csv(HISTORY_FILE, mode='a', header=not os.path.exists(HISTORY_FILE), index=False, encoding='utf-8-sig')
-            except: pass
+            except Exception as e:
+                print(f"存档失败: {e}")
